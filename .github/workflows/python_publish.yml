@@ -1,0 +1,47 @@
+# Build and archive a wheel/sdist on release.
+#
+# Publishing is intentionally NOT wired up. DHI is rolling out devpi as the
+# internal Python package index — once it is live, add a step here to upload
+# the archived dist to devpi (e.g. `uv publish` or `twine upload` pointed at
+# the internal index, with credentials from a repo/environment secret).
+#
+# Do NOT publish to public PyPI or TestPyPI from this template — the package
+# is proprietary. The `Private :: Do Not Upload` classifier in pyproject.toml
+# is a defensive guard against that.
+
+name: Build Python Package
+
+on:
+  workflow_dispatch:
+
+  release:
+    types: [created]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: extractions/setup-just@v3
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Set up Python
+        run: uv python install 3.11
+
+      - name: Install dependencies
+        run: just publish-install
+
+      - name: Build package
+        run: just build
+
+      - name: Archive distributions
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-dists
+          path: dist/
+
+      # TODO: once devpi is live, add a publish step here.
