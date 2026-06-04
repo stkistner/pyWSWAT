@@ -3,26 +3,24 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-# location of package relative to the repository root (e.g. alternatively "src/my_library")
-# note: the package name 'my_library' can be different from the project name on PyPI
-#       the project name (PyPI) is used for pip install, whereas the package name is used for imports
-packages = ["my_library"]  
+packages = ["src/pywswat"]
 
 [tool.hatch.build.targets.sdist]
 exclude = ["notebooks", "tests", "images"]
 
 [project]
-# name on PyPI (e.g. pip install my_library)
-name = "my_library"
+name = "pywswat"
 version = "0.0.1"
 dependencies = [
-    "numpy"
+    "numpy",
+    "scipy",
+    "mikeio",
 ]
 
 authors = [
   { name="First Last", email="initials@dhigroup.com" },
 ]
-description = "Useful library"
+description = "Wave spectral analysis library"
 readme = "README.md"
 requires-python = ">=3.11"
 license = {file = "LICENSE"}
@@ -44,7 +42,7 @@ dev = [
   "ruff",
   "mypy",
   "mkdocs",
-  "mkdocstrings[python]", 
+  "mkdocstrings[python]",
   "mkdocs-material"
 ]
 
@@ -64,11 +62,13 @@ notebooks = [
   "jupyter",
 ]
 
-[project.urls]
-# Replace DHI/my_library with the actual repository path.
-"Homepage" = "https://github.com/DHI/my_library"
-"Bug Tracker" = "https://github.com/DHI/my_library/issues"
 
+[project.urls]
+"Homepage" = "https://github.com/DHI/pyWSWAT"
+"Bug Tracker" = "https://github.com/DHI/pyWSWAT/issues"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
 
 [tool.ruff]
 # ignore long lines

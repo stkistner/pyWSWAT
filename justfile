@@ -1,6 +1,6 @@
 set windows-shell := ["powershell.exe", "-NoLogo", "-Command"]
 
-LIB := "my_library"
+LIB := "pywswat"
 
 test-install:
 	uv sync --extra test
@@ -9,11 +9,14 @@ test-install:
 nbktest-install:
 	uv sync --extra notebooks
 
+
 dev-install:
 	uv sync --extra dev
 
+
 publish-install:
 	uv sync --extra build --extra dev
+
 
 check: lint typecheck test doctest
 
@@ -21,21 +24,21 @@ build: typecheck test
 	uv run python -m build
 
 lint:
-	uv run ruff check {{LIB}}
+	uv run ruff check src/{{LIB}}
 
 format:
-	uv run ruff format {{LIB}}
+	uv run ruff format src/{{LIB}}
 
 test:
 	uv run pytest --disable-warnings
 
 typecheck:
-	uv run mypy {{LIB}}/ --config-file pyproject.toml
+	uv run mypy src/{{LIB}}/ --config-file pyproject.toml
 
 doctest:
-	uv run pytest --doctest-modules {{LIB}}
+	uv run pytest --doctest-modules src/{{LIB}}
 
-coverage: 
+coverage:
 	uv run pytest --cov-report html --cov={{LIB}} tests/
 
 docs:

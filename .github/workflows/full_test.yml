@@ -42,7 +42,7 @@ jobs:
       - name: Quick lint
         uses: astral-sh/ruff-action@v3 # Fail fast if there are any linting errors
 
-      - name: Install my_library
+      - name: Install pywswat
         run: |
           just test-install
       - name: Static type check

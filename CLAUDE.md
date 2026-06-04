@@ -143,3 +143,23 @@ Install development dependencies:
 ```bash
 pip install -e .[dev]
 ```
+
+
+## Dependency Management
+
+Whenever you add, remove, or modify dependencies in `pyproject.toml` (or any `.toml` file
+that defines project dependencies), immediately run:
+
+    uv sync --all-extras
+
+to update the `.venv`. Do this before proceeding with any further code changes that depend
+on the new packages.
+
+## Notebook Validation
+
+After generating or significantly modifying any Jupyter notebook (`.ipynb`), execute it
+end-to-end using the project's local virtual environment to confirm it runs without errors:
+
+    .venv/bin/jupyter nbconvert --to notebook --execute --inplace <notebook>.ipynb
+
+If execution fails, fix the errors before considering the task complete
