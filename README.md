@@ -1,4 +1,7 @@
 ![logo](images/pyWAT.svg)
+![Python Versions](https://img.shields.io/badge/python-3.11|3.12|3.13|3.14-blue)
+[![Full test](https://github.com/DHI/pywswat/actions/workflows/full_test.yml/badge.svg)](https://github.com/DHI/pywswat/actions/workflows/full_test.yml)
+![OS](https://img.shields.io/badge/OS-Windows%20%7C%20Linux-blue)
 
 # pyWAT — Wave Spectral Analysis for MIKE
 
