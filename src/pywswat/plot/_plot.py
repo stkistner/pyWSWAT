@@ -5,11 +5,11 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 if TYPE_CHECKING:
-    from pywswat.wave_spectrum import SpectraArray
+    from pywswat.core import SpectraArray
 
 
 class SpectraPlotter:
-    """Plotting namespace attached to a :class:`~pywswat.SpectraArray` as ``spec.plot``.
+    """Plotting namespace attached to a :class:`~pywswat.core.SpectraArray` as ``spec.plot``.
 
     Parameters
     ----------
@@ -108,15 +108,22 @@ class SpectraPlotter:
                 "Use .isel(location=i) to select a single point first."
             )
 
-        # Select time step from the underlying DA (always has time as axis 0)
-        da_vals = self._s.da.values  # mikeio order: (time, [dir,] freq)
-        t_idx = time_idx if self._s.has_time else 0
-        slice_2d = da_vals[t_idx]    # (nd, nf) for 2D or (nf,) for 1D
+        # Slice data for the requested time step.
+        # Internal pywswat order: (time?, freq?, dir?)
+        # For plotting we need: (dir, freq) for 2D or (freq,) for 1D
+        spec_data = self._s._data  # (time?, freq, dir?) or (time?, freq)
+        if self._s.has_time:
+            spec_data = spec_data[time_idx]  # (freq, dir?) or (freq,)
+        # spec_data is now (freq, dir) or (freq,)
+        if self._s.has_dir:
+            slice_2d = spec_data.T  # (dir, freq)
+        else:
+            slice_2d = spec_data  # (freq,)
 
         time_note = ""
         if self._s.has_time:
             t = self._s.time
-            time_note = f" ({t[t_idx]})" if t is not None else f" (t={t_idx})"
+            time_note = f" ({t[time_idx]})" if t is not None else f" (t={time_idx})"
 
         # ── 1D frequency spectrum ─────────────────────────────────────────────
         if not self._s.has_dir:
@@ -132,33 +139,31 @@ class SpectraPlotter:
         from matplotlib.colors import LogNorm
         from matplotlib.ticker import LogFormatterSciNotation, LogLocator
 
-        freqs = self._s.freq       # (nf,) Hz
+        freqs = self._s.freq  # (nf,) Hz
         assert freqs is not None
-        dirs = self._s.direction   # (nd,) degrees
+        dirs = self._s.direction  # (nd,) degrees
         assert dirs is not None
 
-        # slice_2d: mikeio order (nd, nf)
-        Z = slice_2d               # (nd, nf)
+        # slice_2d: (nd, nf)
+        Z = slice_2d
 
         # Close the directional loop so the polar plot is continuous at 360°
-        dirs_ext = np.append(dirs, dirs[0] + 360.0)     # (nd+1,)
-        theta = np.deg2rad(dirs_ext)                      # (nd+1,) radians
-        Z_ext = np.vstack([Z, Z[0:1]])                   # (nd+1, nf)
+        dirs_ext = np.append(dirs, dirs[0] + 360.0)  # (nd+1,)
+        theta = np.deg2rad(dirs_ext)  # (nd+1,) radians
+        Z_ext = np.vstack([Z, Z[0:1]])  # (nd+1, nf)
 
         # Period axis: sort ascending so short periods are at centre
-        periods = 1.0 / freqs                             # (nf,)
+        periods = 1.0 / freqs  # (nf,)
         sort_idx = np.argsort(periods)
-        periods_asc = periods[sort_idx]                   # (nf,) ascending
-        Z_sorted = Z_ext[:, sort_idx]                     # (nd+1, nf) reordered
+        periods_asc = periods[sort_idx]  # (nf,) ascending
+        Z_sorted = Z_ext[:, sort_idx]  # (nd+1, nf) reordered
 
         # Colour limits
         vmax_use = float(np.nanmax(Z_sorted)) if vmax is None else vmax
         if vmax_use <= 0:
             vmax_use = 1.0
         vmin_use = (
-            min(1e-4, float(np.exp(np.log(vmax_use) - 4)))
-            if vmin is None
-            else vmin
+            min(1e-4, float(np.exp(np.log(vmax_use) - 4))) if vmin is None else vmin
         )
         if vmax_use <= vmin_use:
             vmin_use = vmax_use / 8.0
@@ -182,7 +187,7 @@ class SpectraPlotter:
         cs = ax.contourf(
             theta,
             periods_asc,
-            Z_plot.T,          # (nf, nd+1)
+            Z_plot.T,  # (nf, nd+1)
             levels=levels,
             norm=norm,
             cmap=cmap,
@@ -198,9 +203,7 @@ class SpectraPlotter:
 
         # ── Period (radial) axis: log scale, period labels ───────────────────
         ax.set_yscale("log")
-        ax.yaxis.set_major_formatter(
-            plt.FuncFormatter(lambda y, _: f"{y:.0f}s")
-        )
+        ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda y, _: f"{y:.0f}s"))
         if period_ticks is not None:
             ax.set_yticks(period_ticks)
         ax.set_ylim(periods_asc[0], periods_asc[-1])
@@ -208,11 +211,11 @@ class SpectraPlotter:
         ax.set_title((title or "Wave Spectrum") + time_note)
 
         if colorbar:
-            cb_kwargs: dict = dict(ax=ax, pad=0.12,
-                                   label="Energy density (m² Hz⁻¹ rad⁻¹)")
+            cb_kwargs: dict = dict(
+                ax=ax, pad=0.12, label="Energy density (m² Hz⁻¹ rad⁻¹)"
+            )
             if log_colors:
-                cb_kwargs.update(ticks=LogLocator(),
-                                 format=LogFormatterSciNotation())
+                cb_kwargs.update(ticks=LogLocator(), format=LogFormatterSciNotation())
             plt.colorbar(cs, **cb_kwargs)
 
         return ax
@@ -250,9 +253,7 @@ class SpectraPlotter:
         import matplotlib.pyplot as plt
 
         if not self._s.has_time:
-            raise ValueError(
-                "timeseries() requires a time axis (has_time is False)."
-            )
+            raise ValueError("timeseries() requires a time axis (has_time is False).")
         if not self._s.has_freq:
             raise ValueError(
                 "timeseries() requires a frequency axis (has_freq is False)."
@@ -261,12 +262,12 @@ class SpectraPlotter:
         if params is None:
             params = ["Hm0"]
 
-        param_data = self._s.to_params()
+        param_data = self._s.to_params()  # dict[str, np.ndarray | float]
         for p in params:
-            if p not in param_data.names:
+            if p not in param_data:
                 raise ValueError(
                     f"Parameter '{p}' not found in to_params() output. "
-                    f"Available: {param_data.names}"
+                    f"Available: {list(param_data.keys())}"
                 )
 
         if self._s.time is not None:
@@ -277,15 +278,13 @@ class SpectraPlotter:
 
         n = len(params)
         if ax is None:
-            fig, axes = plt.subplots(
-                n, 1, figsize=figsize, sharex=True, squeeze=False
-            )
+            fig, axes = plt.subplots(n, 1, figsize=figsize, sharex=True, squeeze=False)
             axes = axes[:, 0]
         else:
             axes = np.atleast_1d(ax)
 
         for i, p in enumerate(params):
-            axes[i].plot(time_values, param_data[p].values, **kwargs)
+            axes[i].plot(time_values, np.asarray(param_data[p]), **kwargs)
             axes[i].set_ylabel(p)
 
         axes[-1].set_xlabel("Time")
@@ -324,22 +323,18 @@ class SpectraPlotter:
         import matplotlib.pyplot as plt
 
         if not self._s.has_freq:
-            raise ValueError(
-                "hist() requires a frequency axis (has_freq is False)."
-            )
+            raise ValueError("hist() requires a frequency axis (has_freq is False).")
         if not self._s.has_time:
-            raise ValueError(
-                "hist() requires a time axis (has_time is False)."
-            )
+            raise ValueError("hist() requires a time axis (has_time is False).")
 
-        param_data = self._s.to_params()
-        if param not in param_data.names:
+        param_data = self._s.to_params()  # dict
+        if param not in param_data:
             raise ValueError(
                 f"Parameter '{param}' not found in to_params() output. "
-                f"Available: {param_data.names}"
+                f"Available: {list(param_data.keys())}"
             )
 
-        values = param_data[param].values
+        values = np.asarray(param_data[param])
 
         if ax is None:
             _, ax = plt.subplots(figsize=figsize)

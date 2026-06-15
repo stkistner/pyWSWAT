@@ -60,7 +60,8 @@ LINE_DFSU = "tests/testdata/spectra/line_spectra.dfsu"
 def test_construct_from_mikeio_da():
     da = mikeio.read(PT_DFSU)[0]
     spec = SpectraArray(da)
-    assert spec.da is da
+    # .da reconstructs a mikeio DataArray (no longer the identical object)
+    assert isinstance(spec.da, mikeio.DataArray)
     assert spec.has_freq
     assert spec.has_dir
     assert spec.has_time
@@ -138,7 +139,7 @@ def test_name_property():
 def test_geometry_property():
     da = mikeio.read(PT_DFSU)[0]
     spec = SpectraArray(da)
-    assert spec.geometry is da.geometry
+    assert isinstance(spec.geometry, type(da.geometry))
 
 
 # ---------------------------------------------------------------------------
@@ -246,47 +247,47 @@ def test_moments_2d_integrates_dir():
 # ---------------------------------------------------------------------------
 
 
-def test_to_params_returns_dataset():
+def test_to_params_returns_dict():
     da = mikeio.read(PT_DFSU)[0]
     spec = SpectraArray(da)
-    ds = spec.to_params()
-    assert isinstance(ds, mikeio.Dataset)
+    params = spec.to_params()
+    assert isinstance(params, dict)
 
 
 def test_to_params_keys_freq_only():
     da = _make_da_pt_1d(nt=1)
     spec = SpectraArray(da)
-    ds = spec.to_params()
+    params = spec.to_params()
     for k in ["Hm0", "Tp", "T01", "T02", "Tm10"]:
-        assert k in ds.names
+        assert k in params
     for k in ["MWD", "PWD", "DSD"]:
-        assert k not in ds.names
+        assert k not in params
 
 
 def test_to_params_keys_2d():
     da = _make_da_pt_2d(nt=1)
     spec = SpectraArray(da)
-    ds = spec.to_params()
+    params = spec.to_params()
     for k in ["Hm0", "Tp", "T01", "T02", "Tm10", "MWD", "PWD", "DSD"]:
-        assert k in ds.names
+        assert k in params
 
 
-def test_to_params_single_step_shape():
-    """Single time step → each parameter DA has shape (1,)."""
+def test_to_params_single_step_scalar():
+    """Single time step point spectrum → parameters are scalars (float)."""
     da = _make_da_pt_2d(nt=1)
     spec = SpectraArray(da)
-    ds = spec.to_params()
-    assert ds["Hm0"].values.shape == (1,)
+    params = spec.to_params()
+    assert isinstance(params["Hm0"], (float, np.floating))
 
 
 def test_to_params_multi_step_shape():
-    """Multi time step → each parameter DA has shape (nt,)."""
+    """Multi time step → each parameter is an ndarray of shape (nt,)."""
     nt = 6
     da = _make_da_pt_2d(nt=nt)
     spec = SpectraArray(da)
-    ds = spec.to_params()
+    params = spec.to_params()
     for k in ["Hm0", "Tp", "T01", "T02", "Tm10", "MWD", "PWD", "DSD"]:
-        assert ds[k].values.shape == (nt,)
+        assert np.asarray(params[k]).shape == (nt,)
 
 
 def test_hm0_matches_formula():
@@ -296,10 +297,10 @@ def test_hm0_matches_formula():
     geom = _make_geom_pt(freq=freq)
     da = mikeio.DataArray(data=data_1d[np.newaxis, :], time=_TIME1, geometry=geom)
     spec = SpectraArray(da)
-    ds = spec.to_params()
+    params = spec.to_params()
     m0 = float(spec._moments([0])[0])
     hm0_expected = 4.0 * np.sqrt(m0)
-    assert float(ds["Hm0"].values[0]) == pytest.approx(hm0_expected, rel=1e-6)
+    assert float(params["Hm0"]) == pytest.approx(hm0_expected, rel=1e-6)
 
 
 def test_tp_near_peak_frequency():
@@ -308,9 +309,9 @@ def test_tp_near_peak_frequency():
     geom = _make_geom_pt(freq=FREQ)
     da = mikeio.DataArray(data=data_1d[np.newaxis, :], time=_TIME1, geometry=geom)
     spec = SpectraArray(da)
-    ds = spec.to_params()
+    params = spec.to_params()
     nearest_bin = FREQ[np.argmin(np.abs(FREQ - fp))]
-    assert float(ds["Tp"].values[0]) == pytest.approx(1.0 / nearest_bin, rel=1e-6)
+    assert float(params["Tp"]) == pytest.approx(1.0 / nearest_bin, rel=1e-6)
 
 
 def test_period_ordering():
@@ -318,10 +319,10 @@ def test_period_ordering():
     geom = _make_geom_pt(freq=FREQ)
     da = mikeio.DataArray(data=data_1d[np.newaxis, :], time=_TIME1, geometry=geom)
     spec = SpectraArray(da)
-    ds = spec.to_params()
-    t02 = float(ds["T02"].values[0])
-    t01 = float(ds["T01"].values[0])
-    tm10 = float(ds["Tm10"].values[0])
+    params = spec.to_params()
+    t02 = float(params["T02"])
+    t01 = float(params["T01"])
+    tm10 = float(params["Tm10"])
     assert t02 <= t01 + 1e-10
     assert t01 <= tm10 + 1e-10
 
@@ -338,15 +339,15 @@ def test_mwd_single_direction_bin():
     raw[0, 9, :] = 1.0
     da = _make_da_pt_2d(nt=1, data=raw)
     spec = SpectraArray(da)
-    ds = spec.to_params()
-    assert float(ds["MWD"].values[0]) == pytest.approx(90.0, abs=2.0)
+    params = spec.to_params()
+    assert float(params["MWD"]) == pytest.approx(90.0, abs=2.0)
 
 
 def test_dsd_isotropic():
     da = _make_da_pt_2d(nt=1)  # uniform energy in all dirs
     spec = SpectraArray(da)
-    ds = spec.to_params()
-    assert float(ds["DSD"].values[0]) == pytest.approx(np.sqrt(2.0), rel=0.01)
+    params = spec.to_params()
+    assert float(params["DSD"]) == pytest.approx(np.sqrt(2.0), rel=0.01)
 
 
 def test_dsd_nearly_unidirectional():
@@ -355,8 +356,8 @@ def test_dsd_nearly_unidirectional():
     raw[0, 5, :] = 1.0  # concentrated at one direction
     da = _make_da_pt_2d(nt=1, data=raw)
     spec = SpectraArray(da)
-    ds = spec.to_params()
-    assert float(ds["DSD"].values[0]) < 0.2
+    params = spec.to_params()
+    assert float(params["DSD"]) < 0.2
 
 
 def test_pwd_returns_direction_at_peak():
@@ -366,8 +367,8 @@ def test_pwd_returns_direction_at_peak():
     raw[0, 18, 10] = 10.0
     da = _make_da_pt_2d(nt=1, data=raw)
     spec = SpectraArray(da)
-    ds = spec.to_params()
-    assert float(ds["PWD"].values[0]) == pytest.approx(180.0, abs=1.0)
+    params = spec.to_params()
+    assert float(params["PWD"]) == pytest.approx(180.0, abs=1.0)
 
 
 # ---------------------------------------------------------------------------
@@ -390,8 +391,10 @@ def test_params_time_consistent_with_single_step():
         da_i = mikeio.DataArray(data=raw[[i]], time=time[[i]], geometry=geom)
         spec_i = SpectraArray(da_i)
         ds_i = spec_i.to_params()
-        assert ds_t["Hm0"].values[i] == pytest.approx(ds_i["Hm0"].values[0], rel=1e-10)
-        assert ds_t["Tp"].values[i] == pytest.approx(ds_i["Tp"].values[0], rel=1e-10)
+        assert np.asarray(ds_t["Hm0"])[i] == pytest.approx(
+            float(ds_i["Hm0"]), rel=1e-10
+        )
+        assert np.asarray(ds_t["Tp"])[i] == pytest.approx(float(ds_i["Tp"]), rel=1e-10)
 
 
 # ---------------------------------------------------------------------------
@@ -545,8 +548,8 @@ def test_isel_matches_mikeio_isel():
     pt_pywswat = spec.isel(location=5)
     pt_mikeio = SpectraArray(da.isel(element=5))
     np.testing.assert_allclose(
-        pt_pywswat.to_params()["Hm0"].values,
-        pt_mikeio.to_params()["Hm0"].values,
+        np.asarray(pt_pywswat.to_params()["Hm0"]),
+        np.asarray(pt_mikeio.to_params()["Hm0"]),
     )
 
 
@@ -572,10 +575,10 @@ def test_area_shape():
 def test_area_to_params_shape():
     da = mikeio.read(AREA_DFSU)[0]
     spec = SpectraArray(da)
-    ds = spec.to_params()
+    params = spec.to_params()
     nt = len(da.time)
-    assert ds["Hm0"].values.shape == (nt, 40)
-    assert ds["MWD"].values.shape == (nt, 40)
+    assert np.asarray(params["Hm0"]).shape == (nt, 40)
+    assert np.asarray(params["MWD"]).shape == (nt, 40)
 
 
 def test_area_integrate_dir():
@@ -743,7 +746,7 @@ def test_spectraset_isel_area():
 def test_spectraset_ds_property():
     ds = mikeio.read(PT_DFSU)
     ss = SpectraSet(ds)
-    assert ss.ds is ds
+    assert isinstance(ss.ds, mikeio.Dataset)
 
 
 def test_spectraset_iter():

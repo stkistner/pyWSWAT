@@ -3,11 +3,12 @@ from __future__ import annotations
 import numpy as np
 import mikeio
 
-from pywswat.wave_spectrum import SpectraArray
+from pywswat.core import SpectraArray
+from pywswat.mikeio._adapters import from_mikeio, to_params_dataset
 
 
 class SpectraSet:
-    """A collection of spectral DataArrays, wrapping a :class:`mikeio.Dataset`.
+    """A collection of spectral :class:`~pywswat.core.SpectraArray` objects.
 
     All items must share the same spectral geometry (frequencies and
     directions).  Provides batch spectral analysis and a Dataset-level
@@ -15,10 +16,9 @@ class SpectraSet:
 
     Parameters
     ----------
-    ds : mikeio.Dataset
-        A Dataset whose items all carry spectral geometry
-        (``GeometryFMPointSpectrum``, ``GeometryFMAreaSpectrum``, or
-        ``GeometryFMLineSpectrum``).
+    ds : mikeio.Dataset, list of SpectraArray, or dict of SpectraArray
+        Source data.  A ``mikeio.Dataset`` is converted automatically via
+        :func:`~pywswat.mikeio._adapters.from_mikeio`.
 
     Raises
     ------
@@ -36,11 +36,19 @@ class SpectraSet:
     True
     """
 
-    def __init__(self, ds: mikeio.Dataset) -> None:
-        self._ds = ds
-        self._arrays: dict[str, SpectraArray] = {
-            da.name: SpectraArray(da) for da in ds
-        }
+    def __init__(
+        self,
+        ds: "mikeio.Dataset | list[SpectraArray] | dict[str, SpectraArray]",
+    ) -> None:
+        if isinstance(ds, mikeio.Dataset):
+            self._arrays: dict[str, SpectraArray] = {
+                da.name: from_mikeio(da) for da in ds
+            }
+        elif isinstance(ds, dict):
+            self._arrays = dict(ds)
+        else:
+            items = list(ds)
+            self._arrays = {sa.name: sa for sa in items}
         self._validate()
 
     # ------------------------------------------------------------------
@@ -66,32 +74,27 @@ class SpectraSet:
 
     @property
     def ds(self) -> mikeio.Dataset:
-        """The underlying mikeio Dataset."""
-        return self._ds
+        """Reconstruct a :class:`mikeio.Dataset` from all items."""
+        return mikeio.Dataset([sa.to_mikeio() for sa in self._arrays.values()])
 
     @property
     def names(self) -> list[str]:
-        """Names of all spectral items."""
         return list(self._arrays.keys())
 
     @property
     def n_items(self) -> int:
-        """Number of spectral items."""
         return len(self._arrays)
 
     @property
     def freq(self) -> np.ndarray | None:
-        """Shared frequency axis (Hz)."""
         return next(iter(self._arrays.values())).freq
 
     @property
     def direction(self) -> np.ndarray | None:
-        """Shared direction axis (degrees)."""
         return next(iter(self._arrays.values())).direction
 
     @property
     def time(self) -> np.ndarray | None:
-        """Shared time axis."""
         return next(iter(self._arrays.values())).time
 
     @property
@@ -112,7 +115,6 @@ class SpectraSet:
 
     @property
     def shape(self) -> tuple[int, ...]:
-        """Shape of a single item's logical data (time?, location?, freq?, dir?)."""
         return next(iter(self._arrays.values())).shape
 
     # ------------------------------------------------------------------
@@ -126,15 +128,9 @@ class SpectraSet:
         return iter(self._arrays.values())
 
     def __getitem__(
-        self, key: str | int | list | slice
-    ) -> SpectraArray | "SpectraSet":
+        self, key: "str | int | list | slice"
+    ) -> "SpectraArray | SpectraSet":
         """Index into the collection.
-
-        Parameters
-        ----------
-        key : str, int, list of str/int, or slice
-            A ``str`` or ``int`` returns the matching :class:`SpectraArray`.
-            A ``list`` or ``slice`` returns a new :class:`SpectraSet`.
 
         Examples
         --------
@@ -151,7 +147,7 @@ class SpectraSet:
             return self._arrays[names[int(key)]]
         if isinstance(key, slice):
             selected = names[key]
-            return SpectraSet(mikeio.Dataset([self._ds[n] for n in selected]))
+            return SpectraSet([self._arrays[n] for n in selected])
         if isinstance(key, list):
             resolved: list[str] = []
             for k in key:
@@ -163,7 +159,7 @@ class SpectraSet:
                     raise TypeError(
                         f"List index must be str or int, got {type(k).__name__!r}."
                     )
-            return SpectraSet(mikeio.Dataset([self._ds[n] for n in resolved]))
+            return SpectraSet([self._arrays[n] for n in resolved])
         raise TypeError(f"Invalid index type: {type(key).__name__!r}.")
 
     # ------------------------------------------------------------------
@@ -172,11 +168,6 @@ class SpectraSet:
 
     def to_params(self) -> mikeio.Dataset:
         """Compute integrated wave parameters for all items.
-
-        Returns a single :class:`mikeio.Dataset`.  For a single-item
-        ``SpectraSet`` parameter names are unchanged (e.g. ``"Hm0"``).
-        For multi-item sets they are prefixed with the item name
-        (e.g. ``"wind_sea_Hm0"``, ``"swell_Hm0"``).
 
         Returns
         -------
@@ -194,11 +185,11 @@ class SpectraSet:
         True
         """
         if self.n_items == 1:
-            return next(iter(self._arrays.values())).to_params()
+            return to_params_dataset(next(iter(self._arrays.values())))
 
         all_das: list[mikeio.DataArray] = []
         for item_name, spec in self._arrays.items():
-            item_ds = spec.to_params()
+            item_ds = to_params_dataset(spec)
             for param_name in item_ds.names:
                 src = item_ds[param_name]
                 all_das.append(
@@ -215,16 +206,6 @@ class SpectraSet:
     def integrate_dir(self) -> "SpectraSet":
         """Integrate over the direction axis for all items.
 
-        Returns
-        -------
-        SpectraSet
-            New set without the direction axis.
-
-        Raises
-        ------
-        ValueError
-            If no direction axis is present.
-
         Examples
         --------
         >>> import mikeio
@@ -234,25 +215,11 @@ class SpectraSet:
         >>> ss_f.has_dir
         False
         """
-        new_das = [spec.integrate_dir().da for spec in self._arrays.values()]
-        return SpectraSet(mikeio.Dataset(new_das))
+        new_specs = [spec.integrate_dir() for spec in self._arrays.values()]
+        return SpectraSet(new_specs)
 
-    def sel_freq(
-        self, fmin: float = 0.0, fmax: float = float("inf")
-    ) -> "SpectraSet":
+    def sel_freq(self, fmin: float = 0.0, fmax: float = float("inf")) -> "SpectraSet":
         """Slice the frequency axis for all items.
-
-        Parameters
-        ----------
-        fmin : float
-            Lower frequency bound (inclusive), in Hz.
-        fmax : float
-            Upper frequency bound (inclusive), in Hz.
-
-        Returns
-        -------
-        SpectraSet
-            New set with the sliced frequency axis.
 
         Examples
         --------
@@ -263,21 +230,11 @@ class SpectraSet:
         >>> bool(ss2.freq[0] >= 0.1)
         True
         """
-        new_das = [spec.sel_freq(fmin, fmax).da for spec in self._arrays.values()]
-        return SpectraSet(mikeio.Dataset(new_das))
+        new_specs = [spec.sel_freq(fmin, fmax) for spec in self._arrays.values()]
+        return SpectraSet(new_specs)
 
     def isel(self, location: int) -> "SpectraSet":
         """Select a single location by index for all items.
-
-        Parameters
-        ----------
-        location : int
-            Index into the location (element or node) axis.
-
-        Returns
-        -------
-        SpectraSet
-            New set without the location axis.
 
         Examples
         --------
@@ -288,8 +245,8 @@ class SpectraSet:
         >>> ss_pt.has_location
         False
         """
-        new_das = [spec.isel(location).da for spec in self._arrays.values()]
-        return SpectraSet(mikeio.Dataset(new_das))
+        new_specs = [spec.isel(location) for spec in self._arrays.values()]
+        return SpectraSet(new_specs)
 
     # ------------------------------------------------------------------
     # Repr
@@ -298,10 +255,14 @@ class SpectraSet:
     def __repr__(self) -> str:
         lines = ["<pywswat.SpectraSet>"]
 
+        # Reuse SpectraArray.__repr__ dims logic by delegating to first item
         first = next(iter(self._arrays.values()))
-        da = first.da
-        dims_str = ", ".join(f"{d}:{s}" for d, s in zip(da.dims, da.values.shape))
-        lines.append(f"dims: ({dims_str})")
+        # Extract the "dims: (...)" line from the item repr
+        item_repr_lines = repr(first).splitlines()
+        for line in item_repr_lines:
+            if line.startswith("dims:"):
+                lines.append(line)
+                break
 
         if self.has_freq and self.freq is not None:
             lines.append(f"frequency: {self.freq[0]:.3f} - {self.freq[-1]:.3f} Hz")
@@ -321,4 +282,3 @@ class SpectraSet:
                 lines.append(f"  {i}: {name}")
 
         return "\n".join(lines)
-

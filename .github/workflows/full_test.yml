@@ -53,3 +53,12 @@ jobs:
       - name: Test docstrings with pytest
         run: |
           just doctest
+
+  full-test:
+    needs: build
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: All matrix jobs passed
+        run: |
+          if [ "${{ needs.build.result }}" != "success" ]; then exit 1; fi

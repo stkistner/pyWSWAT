@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import mikeio
 
-from pywswat.wave_spectrum import SpectraArray
-from pywswat.collection import SpectraSet
+from pywswat.core import SpectraArray
+from pywswat.mikeio._adapters import from_mikeio
+
+if TYPE_CHECKING:
+    from pywswat.collection import SpectraSet
 
 
 def read(
@@ -37,6 +41,7 @@ def read(
 
     Examples
     --------
+    >>> from pywswat.collection import SpectraSet
     >>> spec = read("tests/testdata/spectra/pt_spectra.dfsu")
     >>> isinstance(spec, SpectraSet)
     True
@@ -44,6 +49,8 @@ def read(
     >>> isinstance(spec_da, SpectraArray)
     True
     """
+    from pywswat.collection import SpectraSet  # lazy to avoid circular import
+
     path = Path(path)
     ds = mikeio.read(str(path))
 
@@ -52,4 +59,4 @@ def read(
             ds = mikeio.Dataset([ds[i] for i in item])
         return SpectraSet(ds)
 
-    return SpectraArray(ds[item])
+    return from_mikeio(ds[item])

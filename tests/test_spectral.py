@@ -1,4 +1,5 @@
 """Tests for spectral estimation: spectrum, spectrum_welch, spectrum_mem."""
+
 from __future__ import annotations
 
 import numpy as np
@@ -7,16 +8,16 @@ import pytest
 import mikeio
 
 from pywswat import SpectraArray, SpectraSet, spectrum, spectrum_welch, spectrum_mem
-from pywswat._mem import mem_lk86, mem_newton
+from pywswat.spectral._mem import mem_lk86, mem_newton
 
 # ---------------------------------------------------------------------------
 # Shared synthetic signal helpers
 # ---------------------------------------------------------------------------
 
 G = 9.81
-DT = 0.5           # 2 Hz sampling
+DT = 0.5  # 2 Hz sampling
 N = 4096
-F0 = 0.1           # Hz — peak frequency
+F0 = 0.1  # Hz — peak frequency
 OMEGA0 = 2 * np.pi * F0
 THETA0_DEG = 225.0  # degrees — wave direction
 THETA0_RAD = np.deg2rad(THETA0_DEG)
@@ -28,7 +29,9 @@ def _sine_da(f0=F0, dt=DT, n=N, name="eta") -> mikeio.DataArray:
     """Clean sinusoidal time series at frequency f0."""
     t_arr = np.arange(n) * dt
     sig = np.sin(2 * np.pi * f0 * t_arr)
-    return mikeio.DataArray(sig, time=pd.date_range("2000-01-01", periods=n, freq=f"{dt}s"), name=name)
+    return mikeio.DataArray(
+        sig, time=pd.date_range("2000-01-01", periods=n, freq=f"{dt}s"), name=name
+    )
 
 
 def _noisy_mono_dataset(
@@ -46,13 +49,19 @@ def _noisy_mono_dataset(
     t_arr = np.arange(n) * dt
     time = pd.date_range("2000-01-01", periods=n, freq=f"{dt}s")
     eta = np.sin(2 * np.pi * f0 * t_arr) + rng.standard_normal(n) * noise_scale
-    u = (G / omega) * np.cos(np.deg2rad(theta_deg)) * eta + rng.standard_normal(n) * noise_scale
-    v = (G / omega) * np.sin(np.deg2rad(theta_deg)) * eta + rng.standard_normal(n) * noise_scale
-    return mikeio.Dataset([
-        mikeio.DataArray(eta, time=time, name="eta"),
-        mikeio.DataArray(u, time=time, name="u"),
-        mikeio.DataArray(v, time=time, name="v"),
-    ])
+    u = (G / omega) * np.cos(np.deg2rad(theta_deg)) * eta + rng.standard_normal(
+        n
+    ) * noise_scale
+    v = (G / omega) * np.sin(np.deg2rad(theta_deg)) * eta + rng.standard_normal(
+        n
+    ) * noise_scale
+    return mikeio.Dataset(
+        [
+            mikeio.DataArray(eta, time=time, name="eta"),
+            mikeio.DataArray(u, time=time, name="u"),
+            mikeio.DataArray(v, time=time, name="v"),
+        ]
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -85,8 +94,7 @@ def test_spectrum_hm0_from_sine():
     """For a unit-amplitude sine, Hm0 ≈ 4*sqrt(m0) ≈ 4*sqrt(0.5) ≈ 2.83."""
     da = _sine_da()
     spec = spectrum(da)
-    ds = spec.to_params()
-    hm0 = float(ds["Hm0"].values[0])
+    hm0 = float(spec.to_params()["Hm0"])
     # Unit sinusoid: variance = 0.5 → Hm0 = 4*sqrt(0.5) ≈ 2.83
     assert hm0 == pytest.approx(4.0 * np.sqrt(0.5), rel=0.05)
 
@@ -147,8 +155,7 @@ def test_spectrum_welch_peak_correct():
 def test_spectrum_welch_hm0_from_sine():
     da = _sine_da()
     spec = spectrum_welch(da, window_size=512)
-    ds = spec.to_params()
-    hm0 = float(ds["Hm0"].values[0])
+    hm0 = float(spec.to_params()["Hm0"])
     assert hm0 == pytest.approx(4.0 * np.sqrt(0.5), rel=0.10)
 
 
@@ -169,6 +176,7 @@ def test_spectrum_welch_fewer_freqs_than_fft():
 
 def test_spectrum_welch_geometry_type():
     from mikeio.spatial._FM_geometry_spectral import GeometryFMPointSpectrum
+
     da = _sine_da()
     spec = spectrum_welch(da)
     assert isinstance(spec.geometry, GeometryFMPointSpectrum)
@@ -290,7 +298,7 @@ def test_spectrum_mem_dims_mikeio_order():
 def test_spectrum_mem_default_directions():
     ds = _noisy_mono_dataset()
     spec = spectrum_mem(ds, "eta", "u", "v", window_size=512)
-    assert spec.nd == 36   # 0–350 in 10° steps
+    assert spec.nd == 36  # 0–350 in 10° steps
 
 
 def test_spectrum_mem_custom_directions():
@@ -309,8 +317,8 @@ def test_spectrum_mem_hm0_matches_eta_spectrum():
     spec_2d = spectrum_mem(ds, "eta", "u", "v", window_size=512)
     spec_1d = spectrum_welch(ds["eta"], window_size=512)
 
-    hm0_2d = float(spec_2d.to_params()["Hm0"].values[0])
-    hm0_1d = float(spec_1d.to_params()["Hm0"].values[0])
+    hm0_2d = float(spec_2d.to_params()["Hm0"])
+    hm0_1d = float(spec_1d.to_params()["Hm0"])
     assert hm0_2d == pytest.approx(hm0_1d, rel=0.10)
 
 
@@ -322,10 +330,10 @@ def test_spectrum_mem_mwd_near_input_direction():
     """
     ds = _noisy_mono_dataset(theta_deg=THETA0_DEG, noise_scale=0.02)
     spec = spectrum_mem(ds, "eta", "u", "v", window_size=512)
-    mwd = float(spec.to_params()["MWD"].values[0])
-    expected_meteo = (270.0 - THETA0_DEG) % 360.0   # 45.0° for THETA0=225°
+    mwd = float(spec.to_params()["MWD"])
+    expected_meteo = (270.0 - THETA0_DEG) % 360.0  # 45.0° for THETA0=225°
     diff = abs((mwd - expected_meteo + 180) % 360 - 180)  # circular distance
-    assert diff < 30.0   # within 30°
+    assert diff < 30.0  # within 30°
 
 
 def test_spectrum_mem_lk86_vs_newton_similar():
@@ -333,8 +341,8 @@ def test_spectrum_mem_lk86_vs_newton_similar():
     ds = _noisy_mono_dataset()
     s_lk = spectrum_mem(ds, "eta", "u", "v", window_size=512, method="lk86")
     s_nw = spectrum_mem(ds, "eta", "u", "v", window_size=512, method="newton")
-    hm0_lk = float(s_lk.to_params()["Hm0"].values[0])
-    hm0_nw = float(s_nw.to_params()["Hm0"].values[0])
+    hm0_lk = float(s_lk.to_params()["Hm0"])
+    hm0_nw = float(s_nw.to_params()["Hm0"])
     assert hm0_lk == pytest.approx(hm0_nw, rel=0.05)
 
 
@@ -344,17 +352,18 @@ def test_spectrum_mem_invalid_method_raises():
         spectrum_mem(ds, "eta", "u", "v", method="bad_method")
 
 
-def test_spectrum_mem_to_params_returns_dataset():
+def test_spectrum_mem_to_params_returns_dict():
     ds = _noisy_mono_dataset()
     spec = spectrum_mem(ds, "eta", "u", "v", window_size=512)
     params = spec.to_params()
-    assert isinstance(params, mikeio.Dataset)
+    assert isinstance(params, dict)
     for key in ["Hm0", "Tp", "MWD", "DSD"]:
-        assert key in params.names
+        assert key in params
 
 
 def test_spectrum_mem_geometry_type():
     from mikeio.spatial._FM_geometry_spectral import GeometryFMPointSpectrum
+
     ds = _noisy_mono_dataset()
     spec = spectrum_mem(ds, "eta", "u", "v", window_size=512)
     assert isinstance(spec.geometry, GeometryFMPointSpectrum)
@@ -377,8 +386,8 @@ def test_spectrum_welch_then_to_params():
     da = _sine_da()
     spec = spectrum_welch(da, window_size=512)
     params = spec.to_params()
-    assert isinstance(params, mikeio.Dataset)
-    assert "Hm0" in params.names
+    assert isinstance(params, dict)
+    assert "Hm0" in params
 
 
 def test_spectrum_mem_then_integrate_dir():
@@ -403,9 +412,10 @@ def _spatial_dataset(n_elem: int = 5, seed: int = 7) -> tuple[mikeio.Dataset, ob
     Returns (ds, geom_2d).
     """
     from pywswat import read as pyw_read
+    from pywswat.mikeio._adapters import to_params_dataset
 
     spec_area = pyw_read("tests/testdata/spectra/area_spectra.dfsu", item=0)
-    geom_2d = spec_area.to_params()[0].geometry   # GeometryFM2D(Dfsu2D)
+    geom_2d = to_params_dataset(spec_area)["Hm0"].geometry  # GeometryFM2D(Dfsu2D)
 
     N_TIME = 2048
     DT = 0.5
@@ -417,11 +427,13 @@ def _spatial_dataset(n_elem: int = 5, seed: int = 7) -> tuple[mikeio.Dataset, ob
     u_data = rng.standard_normal((N_TIME, n_locs)) * 0.1
     v_data = rng.standard_normal((N_TIME, n_locs)) * 0.1
 
-    ds = mikeio.Dataset([
-        mikeio.DataArray(eta_data, time=time, geometry=geom_2d, name="eta"),
-        mikeio.DataArray(u_data,   time=time, geometry=geom_2d, name="u"),
-        mikeio.DataArray(v_data,   time=time, geometry=geom_2d, name="v"),
-    ])
+    ds = mikeio.Dataset(
+        [
+            mikeio.DataArray(eta_data, time=time, geometry=geom_2d, name="eta"),
+            mikeio.DataArray(u_data, time=time, geometry=geom_2d, name="u"),
+            mikeio.DataArray(v_data, time=time, geometry=geom_2d, name="v"),
+        ]
+    )
     return ds, geom_2d
 
 
@@ -440,6 +452,7 @@ def test_spectrum_mem_spatial_has_location():
 
 def test_spectrum_mem_spatial_geometry_is_area_spectrum():
     from mikeio.spatial._FM_geometry_spectral import GeometryFMAreaSpectrum
+
     ds, _ = _spatial_dataset()
     spec = spectrum_mem(ds, "eta", "u", "v", window_size=256)
     assert isinstance(spec.geometry, GeometryFMAreaSpectrum)
@@ -459,19 +472,23 @@ def test_spectrum_mem_spatial_has_freq_and_dir():
 
 
 def test_spectrum_mem_spatial_to_params_geometry():
-    """to_params on a spatial spectrum should return GeometryFM2D (Dfsu2D)."""
+    """to_params_dataset on a spatial spectrum should return GeometryFM2D (Dfsu2D)."""
     from mikeio.spatial._FM_geometry import GeometryFM2D
+    from pywswat.mikeio._adapters import to_params_dataset
+
     ds, _ = _spatial_dataset()
     spec = spectrum_mem(ds, "eta", "u", "v", window_size=256)
-    ds_params = spec.to_params()
+    ds_params = to_params_dataset(spec)
     assert isinstance(ds_params["Hm0"].geometry, GeometryFM2D)
     assert ds_params["Hm0"].values.shape[1] == spec.nloc
 
 
 def test_spectrum_mem_spatial_to_params_shape():
+    from pywswat.mikeio._adapters import to_params_dataset
+
     ds, geom_2d = _spatial_dataset()
     spec = spectrum_mem(ds, "eta", "u", "v", window_size=256)
-    ds_params = spec.to_params()
+    ds_params = to_params_dataset(spec)
     n_elem = geom_2d.n_elements
     assert ds_params["Hm0"].values.shape == (1, n_elem)
     assert ds_params["MWD"].values.shape == (1, n_elem)
@@ -491,22 +508,23 @@ def test_spectrum_mem_spatial_isel_matches_point():
 
     # Compute directly on the point time series
     eta_loc = ds["eta"].isel(element=loc)
-    u_loc   = ds["u"].isel(element=loc)
-    v_loc   = ds["v"].isel(element=loc)
+    u_loc = ds["u"].isel(element=loc)
+    v_loc = ds["v"].isel(element=loc)
     ds_pt = mikeio.Dataset([eta_loc, u_loc, v_loc])
     spec_pt_direct = spectrum_mem(ds_pt, "eta", "u", "v", window_size=256)
 
     np.testing.assert_allclose(
-        spec_pt_from_area.to_params()["Hm0"].values,
-        spec_pt_direct.to_params()["Hm0"].values,
+        np.asarray(spec_pt_from_area.to_params()["Hm0"]),
+        np.asarray(spec_pt_direct.to_params()["Hm0"]),
         rtol=1e-10,
     )
 
 
 def test_spectrum_mem_spatial_unsupported_geometry_raises():
     """Non-FM geometry should raise TypeError."""
-    from pywswat.spectral import _to_spectral_geom
+    from pywswat.mikeio._adapters import _to_spectral_geom
     from mikeio.spatial import GeometryPoint2D
+
     geom_pt = GeometryPoint2D(x=0.0, y=0.0)
     with pytest.raises(TypeError, match="GeometryFM2D"):
         _to_spectral_geom(geom_pt, np.linspace(0.05, 0.5, 10), np.arange(0, 360, 10.0))
