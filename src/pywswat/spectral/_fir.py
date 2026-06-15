@@ -4,150 +4,105 @@ from __future__ import annotations
 
 from warnings import warn
 
-import mikeio
 import numpy as np
 from scipy.signal import firwin, lfilter
 
 
 def fir_filter(
     data: np.ndarray,
-    time_ax: np.ndarray,
+    dt: float,
     window_size: int = 1025,
     fmax: float | None = None,
     fmin: float | None = None,
     window: str = "hamming",
-):
-    """
-    Generates and applies Finite Imuplse Response filter on a timeseries
+    axis: int = 0,
+) -> tuple[np.ndarray, float]:
+    """Generate and apply a Finite Impulse Response filter to an array.
 
-    Use for low pass (fmax), high pass (fmin), band pass (fmin < fmax) or band stop band pass (fmax < fmin)
-    Uses scipy.signal lfilter & firwin
+    Uses ``scipy.signal.firwin`` to design the filter and ``scipy.signal.lfilter``
+    to apply it.  Supports low-pass, high-pass, band-pass, and band-stop modes.
 
     Parameters
     ----------
-    data : pd.Series, xr.DataArray or mikeio.DataArray
-        N-dimension datastructure with time axis.
-        Series assumes Index is time.
-        Datarray needs to have a time dimension (see 'index_dim')
+    data : np.ndarray
+        Input array.  The time axis is selected by *axis*.
+    dt : float
+        Timestep in seconds.
     window_size : int
-        Width of FIR. Recommended to use a odd number
-    fmin : float
-        Minimum frequency (highpass filter).
-        If None (default), no lowpass will be applied
-    fmax : float
-        frequencies below (lowpass filter)
-        If None (default), no highpass will be applied
-    window : str of scipy.signal.windows
-        Default: 'hann'
-        See scipy.signal.get_window for a list of windows and required parameters.
+        Number of FIR taps.  An odd value avoids a half-sample time offset.
+    fmax : float or None
+        Low-pass cutoff frequency (Hz).  ``None`` means no low-pass.
+    fmin : float or None
+        High-pass cutoff frequency (Hz).  ``None`` means no high-pass.
+    window : str
+        Scipy window type passed to :func:`scipy.signal.firwin`.
+        Default ``"hamming"``.
+    axis : int
+        Axis of *data* along which to apply the filter (the time axis).
+        Default ``0``.
 
     Returns
     -------
-    result : filtered dataseries
+    filtered : np.ndarray
+        Filtered array with the first ``window_size - 1`` samples removed
+        along *axis* to discard the filter startup transient.
+    delay : float
+        Phase delay in seconds (``0.5 * (window_size - 1) * dt``).  Add this
+        to the original time axis after slicing off the first
+        ``window_size - 1`` steps to obtain the corrected time axis.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> rng = np.random.default_rng(0)
+    >>> t = np.arange(2048) * 0.5          # 2048 steps, dt=0.5 s
+    >>> x = np.sin(2 * np.pi * 0.1 * t) + rng.normal(0, 0.1, t.size)
+    >>> filtered, delay = fir_filter(x, dt=0.5, window_size=65, fmax=0.2)
+    >>> filtered.shape[0] == x.shape[0] - 64
+    True
+    >>> round(delay, 4)
+    16.0
     """
-
     if window_size % 2 == 0:
-        warn("N-width is even. Timeaxis will be offset by half a timestep")
+        warn("window_size is even; time axis will be offset by half a timestep")
 
-    # Get time axis
-    if isinstance(ds, pd.Series):
-        time_ax = ds.index
-    elif isinstance(ds, xr.DataArray):
-        if index_dim not in ds.dims:
-            raise ValueError(f"Invalid index_dim: {index_dim} not in xr.DataArray dims")
-        time_ax = ds[index_dim].values
-    elif isinstance(ds, mikeio.dataset._dataset.DataArray):
-        time_ax = ds.time
-    else:
-        raise ValueError("Invalid input. Must be pd.Series or xr.DataArray")
-    time_ax = pd.to_datetime(time_ax)
-
-    if N >= len(time_ax):
+    if window_size >= data.shape[axis]:
         raise ValueError(
-            f"Invalid N: N must be less than the length of the time axis. N={N}, len(time_ax)={len(time_ax)}"
+            f"window_size ({window_size}) must be less than the length of the "
+            f"time axis ({data.shape[axis]})"
         )
 
-    # FIR
-    sample_rate = 1 / _get_T(time_ax)
-    # The Nyquist rate of the signal.
+    sample_rate = 1.0 / dt
     nyq_rate = sample_rate / 2.0
-    # The cutoff frequency of the filter.
 
-    # QC
-    if fmax is not None:
-        if (fmax > nyq_rate) | (fmax <= 0):
-            raise ValueError(
-                f"Invalid cutoff frequency: frequencies must be greater than 0 and less than Nyquist freq={nyq_rate}"
-            )
-    if fmin is not None:
-        if (fmin > nyq_rate) | (fmin <= 0):
-            raise ValueError(
-                f"Invalid cutoff frequency: frequencies must be greater than 0 and less than Nyquist freq={nyq_rate}"
-            )
+    if fmax is not None and (fmax <= 0 or fmax >= nyq_rate):
+        raise ValueError(f"fmax must be in (0, {nyq_rate}); got {fmax}")
+    if fmin is not None and (fmin <= 0 or fmin >= nyq_rate):
+        raise ValueError(f"fmin must be in (0, {nyq_rate}); got {fmin}")
 
     if fmax is None and fmin is None:
-        warn("No frequencies passed")
-        return ds
+        warn("No cutoff frequencies specified; returning data unchanged")
+        return data, 0.0
 
-    # Low pass
     if fmax is not None and fmin is None:
-        f_ = fmax
+        f_: float | np.ndarray = fmax
         pass_zero = True
-    # High pass
-    if fmax is None and fmin is not None:
+    elif fmax is None and fmin is not None:
         f_ = fmin
         pass_zero = False
-    # Bandpass, Bandstop
-    if fmax is not None and fmin is not None:
-        # Bandpass
-        if fmax > fmin:
+    else:
+        assert fmax is not None and fmin is not None
+        if fmax > fmin:  # band-pass
             f_ = np.array([fmin, fmax])
             pass_zero = False
-        # Bandstop
-        else:
+        else:  # band-stop
             f_ = np.array([fmax, fmin])
             pass_zero = True
 
-    # Use firwin to create a lowpass FIR filter.
-    taps = firwin(N, f_ / nyq_rate, window=window, pass_zero=pass_zero)
+    taps = firwin(window_size, f_ / nyq_rate, window=window, pass_zero=pass_zero)
+    delay = 0.5 * (window_size - 1) * dt
 
-    # The phase delay of the filtered signal.
-    delay = 0.5 * (N - 1) / sample_rate
+    filtered = np.apply_along_axis(lambda x: lfilter(taps, 1, x), axis=axis, arr=data)
+    truncated = np.take(filtered, range(window_size - 1, data.shape[axis]), axis=axis)
 
-    # Apply the filter to the signal.
-    if isinstance(ds, pd.Series):
-        nd_fir = lfilter(taps, 1, ds.values)
-        # Create a new time axis for the filtered signal.
-        ds_fir = pd.Series(nd_fir, index=time_ax - pd.Timedelta(delay, unit="s"))
-        # Truncate rubish
-        ds_fir = ds_fir[N - 1 :]
-    elif isinstance(ds, xr.DataArray):
-        # Ax no.
-        ax_no = ds.dims.index(index_dim)
-        # Apply
-        nd_fir = np.apply_along_axis(
-            lambda x: lfilter(taps, 1, x), axis=ax_no, arr=ds.values
-        )
-        # Create time ax
-        ds_fir = xr.DataArray(nd_fir, coords=ds.coords, name=ds.name).assign_coords(
-            {"time": time_ax - pd.Timedelta(delay, unit="s")}
-        )
-        # Truncate rubish
-        ds_fir = ds_fir.isel({index_dim: slice(N - 1, None)})
-
-    elif isinstance(ds, mikeio.dataset._dataset.DataArray):
-        # Ax no.
-        ax_no = ds.dims.index(index_dim)
-        # Apply
-        nd_fir = np.apply_along_axis(
-            lambda x: lfilter(taps, 1, x), axis=ax_no, arr=ds.values
-        )
-        # Create time ax
-        ds_fir = mikeio.DataArray(
-            nd_fir, item=ds.item, geometry=ds.geometry, time=time_ax
-        )
-        ds_fir.time = time_ax - pd.Timedelta(delay, unit="s")
-        # Truncate rubish
-        ds_fir = ds_fir.isel(time=slice(N - 1, None))
-
-    return ds_fir
+    return truncated, delay
